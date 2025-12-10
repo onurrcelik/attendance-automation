@@ -1,0 +1,7 @@
+pytesseract
+Pillow
+gspread
+oauth2client
+thefuzz
+python-dotenv
+google-api-python-client

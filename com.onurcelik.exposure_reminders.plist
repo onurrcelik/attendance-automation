@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.onurcelik.exposure_reminders</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Library/Frameworks/Python.framework/Versions/3.13/bin/python3</string>
+        <string>-u</string>
+        <string>send_reminders.py</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>4</integer> 
+        <key>Hour</key>
+        <integer>19</integer>
+        <key>Minute</key>
+        <integer>00</integer>
+    </dict>
+    <key>WorkingDirectory</key>
+    <string>/Users/onurcelik/Desktop/Cursor Projects/exposure attendance/exposure attendance</string>
+    <key>StandardOutPath</key>
+    <string>/Users/onurcelik/Desktop/Cursor Projects/exposure attendance/exposure attendance/reminders.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/onurcelik/Desktop/Cursor Projects/exposure attendance/exposure attendance/reminders.err</string>
+</dict>
+</plist>

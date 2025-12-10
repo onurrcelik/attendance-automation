@@ -1,0 +1,27 @@
+# Secrets
+.env
+token.json
+credentials.json
+client_secret.json
+
+# Environment
+.venv/
+env/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Logs
+*.log
+*.err
+
+# Google Cloud SDK (if installed locally)
+google-cloud-sdk/
+*.tar.gz
+
+# Temporary/Debug Scripts
+debug_*.py
+send_final_*.py
+send_html_*.py
+test_ocr.py
+
