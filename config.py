@@ -27,11 +27,8 @@ MEETING_TIME_HOUR = 21 # 21:00 CET, so reminder at 19:00? User said 2 hours befo
 
 # OCR Configuration
 
-# OCR Configuration
-# If tesseract is in your PATH, this might not be needed.
-# Otherwise, uncomment and set the path:
-# import pytesseract
-# pytesseract.pytesseract.tesseract_cmd = r'/usr/local/bin/tesseract'
+import pytesseract
+pytesseract.pytesseract.tesseract_cmd = '/opt/homebrew/bin/tesseract'
 
 # Attendance Rules
 CONSECUTIVE_MISS_LIMIT = 3

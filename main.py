@@ -4,11 +4,12 @@ import json
 import datetime
 from PIL import Image
 import pytesseract
-from thefuzz import process
+from thefuzz import process, fuzz
 import gspread
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+import unicodedata
 import config
 
 def get_google_sheet_client():
@@ -81,38 +82,119 @@ def extract_text_from_image(image_path):
         print(f"Error reading image: {e}")
         return ""
 
-def match_attendance(ocr_text, members):
-    """Matches OCR text against member list using fuzzy matching."""
-    present_members = []
-    # Split text into lines/words and try to find member names
-    # This is a naive approach; we might need more sophisticated line parsing
-    # depending on the screenshot layout (e.g. grid of names vs list)
+def normalize_text(text):
+    """
+    Normalizes text by removing diacritics and converting to lowercase.
+    e.g., "Şan Fikri Köktas" -> "san fikri koktas"
+    """
+    if not text:
+        return ""
+    # Normalize unicode characters to closest ASCII equivalent
+    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8')
+    return text.lower().strip()
+
+def clean_line(text):
+    """
+    Removes common noise from OCR lines.
+    """
+    if not text:
+        return ""
+    # Lowercase first
+    text = text.lower()
     
-    # Strategy: Iterate through each member and check if their name (or close match) is in the text
-    # This works better if the text is noisy
+    # Remove specific noise terms
+    noise_terms = ["(me)", "(host)", "(guest)", "iphone", "android", "phone", "..."]
+    for term in noise_terms:
+        text = text.replace(term, "")
+        
+    # Remove non-alphanumeric characters (except spaces) for cleaner matching?
+    # Or just return the cleaned text
+    return text.strip()
+
+def match_attendance(ocr_text, members):
+    """Matches OCR text against member list using improved matching."""
+    present_members = []
+    
+    # Pre-compute first name counts to check for uniqueness
+    # usage: 'Emre' -> 1
+    first_name_counts = {}
+    for m in members:
+        first_name = m.strip().split(" ")[0].lower()
+        # Normalize first name
+        first_name = normalize_text(first_name)
+        first_name_counts[first_name] = first_name_counts.get(first_name, 0) + 1
+
+    # 1. Clean up OCR text
+    normalized_ocr = normalize_text(ocr_text)
+    
+    # Prepare cleaned lines
+    raw_lines = ocr_text.split('\n')
+    cleaned_lines = []
+    for line in raw_lines:
+        line = clean_line(line)
+        line = normalize_text(line)
+        if line:
+            cleaned_lines.append(line)
     
     for member in members:
-        # Check for partial match or best match in the text
-        # We can scan the text line by line
-        # Or just check if the member name exists in the blob with high confidence
-        
-        # Simple check: is the member name (or reasonably close) in the text?
-        # unique_names in text
-        
-        # Let's try searching for the member in the full text
-        # If the member name is "Onur Celik", find "Onur Celik" in text
-        
         if not member.strip():
             continue
             
-        best_match = process.extractOne(member, ocr_text.split('\n'))
-        if best_match and best_match[1] > 80: # Confidence threshold
+        # Normalize member name
+        normalized_member = normalize_text(member)
+        
+        # --- Strategy 1: Exact substring match (normalized) ---
+        if normalized_member in normalized_ocr:
              present_members.append(member)
-             print(f"Matched: {member} (Found: '{best_match[0]}', Score: {best_match[1]})")
-        else:
-            # Fallback for "Firstname" only or similar variations if needed
-            pass
-            
+             print(f"Matched (Substring): {member}")
+             continue
+             
+        # --- Strategy 2: Concatenated Match (e.g. batuhanaltan) ---
+        # Good for "batuhanaltan" vs "Batuhan Altan"
+        nospaces_member = normalized_member.replace(" ", "")
+        found_concat = False
+        for line in cleaned_lines:
+            if nospaces_member in line.replace(" ", ""):
+                present_members.append(member)
+                print(f"Matched (Concatenated): {member} (Line: '{line}')")
+                found_concat = True
+                break
+        if found_concat:
+            continue
+
+        # --- Strategy 3: Fuzzy Match using token_set_ratio ---
+        best_match = process.extractOne(
+            normalized_member, 
+            cleaned_lines, 
+            scorer=fuzz.token_set_ratio
+        )
+        
+        if best_match and best_match[1] >= 85: 
+             present_members.append(member)
+             print(f"Matched (Fuzzy Token): {member} (Found: '{best_match[0]}', Score: {best_match[1]})")
+             continue
+             
+        # --- Strategy 4: Unique First Name Fallback ---
+        # If "Emre" is unique in the group, and we find "Emre" in the text, match it.
+        # This solves "Emre (Patientdesk.ai)" matching "Emre Kaplaner"
+        parts = normalized_member.split()
+        if len(parts) > 0:
+            first_name = parts[0]
+            if first_name_counts.get(first_name) == 1:
+                # Check if this first name exists in lines (fuzzy or exact)
+                # Fuzzy match for just the first name against lines
+                best_fn_match = process.extractOne(
+                    first_name,
+                    cleaned_lines,
+                    scorer=fuzz.token_set_ratio # or partial_ratio?
+                )
+                # Use a slightly stricter threshold for single name to avoid "Ali" matching "Salih" too easily?
+                # "Emre" vs "Emre (Patient...)" -> token_set_ratio should be 100
+                if best_fn_match and best_fn_match[1] >= 90:
+                    present_members.append(member)
+                    print(f"Matched (Unique First Name): {member} (Found: '{best_fn_match[0]}', Score: {best_fn_match[1]})")
+                    continue
+    
     return present_members
 
 def update_sheet_attendance(client, present_members, target_date=None):
@@ -169,7 +251,25 @@ def update_sheet_attendance(client, present_members, target_date=None):
         else:
              print("No updates needed.")
         
-        # Update "Meetings Missed in a Row" column
+        # Recalculate streaks immediately
+        recalculate_missed_streaks(client)
+
+    except Exception as e:
+        print(f"Error updating sheet: {e}")
+
+def recalculate_missed_streaks(client):
+    """
+    Recalculates the '# of Meetings Missed in a Row' for all members
+    based on the current state of the sheet.
+    """
+    if not client:
+        return
+
+    try:
+        sheet = client.open(config.SHEET_NAME).sheet1
+        all_records = sheet.get_all_values()
+        headers = all_records[0]
+        
         missed_col_name = "# of Meetings Missed in a Row"
         missed_col_index = -1
         
@@ -181,10 +281,7 @@ def update_sheet_attendance(client, present_members, target_date=None):
         if missed_col_index != -1:
              print(f"Updating '{missed_col_name}' column (Index: {missed_col_index})...")
              
-             # Re-fetch all data to ensure we have the latest checkbox states
-             updated_records = sheet.get_all_values()
-             
-             # Identify date columns again
+             # Identify date columns
              date_indices = []
              for idx, header in enumerate(headers):
                 try:
@@ -196,11 +293,8 @@ def update_sheet_attendance(client, present_members, target_date=None):
              # Sort by date
              date_indices.sort(key=lambda x: x[1])
              
-             # Filter out future dates: keep dates <= target_date (or today)
-             cutoff_date = target_date if target_date else datetime.date.today()
-             # Ensure cutoff_date is datetime for comparison if needed, or convert dt to date
-             if isinstance(cutoff_date, datetime.datetime):
-                 cutoff_date = cutoff_date.date()
+             # Filter out future dates: keep dates <= TODAY
+             cutoff_date = datetime.date.today()
                  
              valid_date_indices = []
              for idx, dt in date_indices:
@@ -208,7 +302,7 @@ def update_sheet_attendance(client, present_members, target_date=None):
                      valid_date_indices.append(idx)
              
              # Iterate backwards through VALID dates
-             for i, row in enumerate(updated_records[1:]): # Skip header
+             for i, row in enumerate(all_records[1:]): # Skip header
                  row_num = i + 2
                  
                  consecutive_misses = 0
@@ -229,9 +323,6 @@ def update_sheet_attendance(client, present_members, target_date=None):
                  # Cap at 3 for the dropdown options (0, 1, 2, 3)
                  dropdown_val = min(consecutive_misses, 3)
                  
-                 # Optimization: Only update if changed (requires reading current val, but we have `row`)
-                 # But `row` data might be slightly stale for the missed_col if we didn't fetch it specifically?
-                 # We fetched `updated_records`, so it should be fine.
                  current_miss_val = row[missed_col_index - 1]
                  
                  # Check if update needed
@@ -239,12 +330,11 @@ def update_sheet_attendance(client, present_members, target_date=None):
                      sheet.update_cell(row_num, missed_col_index, dropdown_val)
                      if dropdown_val == 3:
                          print(f"Member '{row[0]}' has reached 3 consecutive misses.")
-
         else:
             print(f"Warning: Column '{missed_col_name}' not found.")
 
     except Exception as e:
-        print(f"Error updating sheet: {e}")
+        print(f"Error recalculating streaks: {e}")
 
 def process_single_image(image_path, target_date=None):
     """Main processing logic callable from other scripts."""

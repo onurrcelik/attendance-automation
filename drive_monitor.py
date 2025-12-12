@@ -7,8 +7,24 @@ from googleapiclient.http import MediaIoBaseDownload
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+import re
 import config
 import main as attendance_script  # Import existing logic
+
+def parse_date_from_filename(filename):
+    """
+    Tries to parse a date from the filename in DD.MM.YYYY format.
+    Returns a datetime.date object or None if no match found.
+    """
+    # Regex for DD.MM.YYYY
+    match = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", filename)
+    if match:
+        day, month, year = map(int, match.groups())
+        try:
+            return datetime.date(year, month, day)
+        except ValueError:
+            return None
+    return None
 
 def get_drive_service():
     """Authenticates and returns the Drive API service."""
@@ -95,13 +111,20 @@ def process_drive_file(service, file_meta):
         f.write(fh.getbuffer())
         
     # 2. Determine Attendance Date
-    # Parse createdTime (e.g., 2025-12-10T17:48:08.000Z)
-    # We strip 'Z' and typically handle UTC. For simplicity, we treat as naive or assume UTC.
-    upload_dt = datetime.datetime.fromisoformat(created_time_str.replace('Z', '+00:00'))
-    upload_date = upload_dt.date()
+    # First, try to parse from filename (e.g., 04.12.2025.png)
+    parsed_date = parse_date_from_filename(file_name)
     
-    meeting_thursday = get_latest_thursday(upload_date)
-    print(f"File uploaded on {upload_date}. Assigning to meeting on Thursday {meeting_thursday}.")
+    if parsed_date:
+        meeting_thursday = parsed_date
+        print(f"Parsed date from filename: {meeting_thursday}")
+    else:
+        # Fallback: Parse createdTime (e.g., 2025-12-10T17:48:08.000Z)
+        # We strip 'Z' and typically handle UTC. For simplicity, we treat as naive or assume UTC.
+        upload_dt = datetime.datetime.fromisoformat(created_time_str.replace('Z', '+00:00'))
+        upload_date = upload_dt.date()
+        
+        meeting_thursday = get_latest_thursday(upload_date)
+        print(f"File uploaded on {upload_date}. Assigning to meeting on Thursday {meeting_thursday}.")
     
     # 3. Process Attendance
     success = attendance_script.process_single_image(local_path, target_date=meeting_thursday)
@@ -131,21 +154,36 @@ def process_drive_file(service, file_meta):
         print(f"Failed to process {file_name}. Left in source folder.")
 
 def start_monitoring():
-    print("Starting Drive Monitor...")
-    print("Press Ctrl+C to stop.")
+    print("Starting Drive Monitor...", flush=True)
+    print("Press Ctrl+C to stop.", flush=True)
     service = get_drive_service()
     
+    sheet_client = attendance_script.get_google_sheet_client()
+
     while True:
         try:
             check_for_files(service)
-            # Sleep for 6 hours (21600 seconds)
-            time.sleep(21600)
+            
+            # Also sync sheet streaks (handle manual updates)
+            if sheet_client:
+                 attendance_script.recalculate_missed_streaks(sheet_client)
+            else:
+                 # Try to reconnect if client failed initially or expired? 
+                 # get_google_sheet_client handles auth refresh internally usually if using gspread properly
+                 # but here we just retry getting it
+                 sheet_client = attendance_script.get_google_sheet_client()
+
+            # Sleep for 1 minute (60 seconds)
+            time.sleep(60)
         except KeyboardInterrupt:
-            print("Stopping...")
+            print("Stopping...", flush=True)
             break
         except Exception as e:
-            print(f"Error in monitoring loop: {e}")
+            print(f"Error in monitoring loop: {e}", flush=True)
             time.sleep(60)
 
 if __name__ == "__main__":
+    # Force unbuffered stdout just in case
+    import sys
+    sys.stdout.reconfigure(line_buffering=True)
     start_monitoring()
