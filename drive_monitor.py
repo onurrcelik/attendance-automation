@@ -7,6 +7,8 @@ from googleapiclient.http import MediaIoBaseDownload
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
+import json
 import re
 import config
 import main as attendance_script  # Import existing logic
@@ -30,11 +32,19 @@ def get_drive_service():
     """Authenticates and returns the Drive API service."""
     creds = None
     if os.path.exists(config.TOKEN_FILE):
-        creds = Credentials.from_authorized_user_file(config.TOKEN_FILE, config.SCOPES)
+        try:
+            creds = Credentials.from_authorized_user_file(config.TOKEN_FILE, config.SCOPES)
+        except (ValueError, json.JSONDecodeError):
+            print("Token file corrupted. Re-authenticating...")
+            creds = None
     
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+            except RefreshError:
+                print("Token expired and refresh failed. Re-authenticating...")
+                creds = None
         else:
              # This should be handled by main.py first run usually, but good to have
             flow = InstalledAppFlow.from_client_config(
