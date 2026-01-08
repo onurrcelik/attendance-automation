@@ -311,14 +311,24 @@ def recalculate_missed_streaks(client):
                      val = row[col_idx]
                      str_val = str(val).strip().upper()
                      
-                     # Check if present
-                     is_present = str_val in ["TRUE", "1", "YES"]
+                     # Handle attendance states:
+                     # - Empty/"" = No meeting that week, SKIP (don't count, don't reset)
+                     # - FALSE = Meeting happened, person was ABSENT (counts as miss)
+                     # - TRUE/1/YES = Meeting happened, person was PRESENT (resets streak)
                      
-                     if not is_present:
+                     if str_val == "":
+                         # No screenshot uploaded = no meeting = SKIP this week
+                         # Don't count it, but also don't reset the streak
+                         continue
+                     elif str_val == "FALSE":
+                         # Meeting happened, person was absent
                          consecutive_misses += 1
-                     else:
-                         # Found a meeting they attended, reset/stop counting
+                     elif str_val in ["TRUE", "1", "YES"]:
+                         # Meeting happened, person was present - reset streak
                          break
+                     else:
+                         # Unknown value, skip
+                         continue
                  
                  # Cap at 3 for the dropdown options (0, 1, 2, 3)
                  dropdown_val = min(consecutive_misses, 3)
@@ -326,10 +336,18 @@ def recalculate_missed_streaks(client):
                  current_miss_val = row[missed_col_index - 1]
                  
                  # Check if update needed
+                 # IMPORTANT: Once someone reaches 3 misses, they stay locked at 3
+                 # They cannot reset their counter by attending - it's a permanent flag
+                 current_val_str = str(current_miss_val).strip()
+                 
+                 if current_val_str == "3":
+                     # Already at 3 - DON'T reset, keep it locked at 3
+                     continue
+                 
                  if str(current_miss_val) != str(dropdown_val):
                      sheet.update_cell(row_num, missed_col_index, dropdown_val)
                      if dropdown_val == 3:
-                         print(f"Member '{row[0]}' has reached 3 consecutive misses.")
+                         print(f"⚠️ ALERT: Member '{row[0]}' has reached 3 consecutive misses! (LOCKED)")
         else:
             print(f"Warning: Column '{missed_col_name}' not found.")
 
