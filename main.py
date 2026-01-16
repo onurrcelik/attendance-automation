@@ -234,15 +234,21 @@ def update_sheet_attendance(client, present_members, target_date=None):
             member_name = row[member_name_col_index]
             row_num = i + 2 
             
-            is_present = member_name in present_members
-            current_val = row[col_index - 1] # 0-based index
+            is_present_from_screenshot = member_name in present_members
+            current_val = str(row[col_index - 1]).strip().upper()
             
-            # Optimization: Only update if changed (comparing string representations)
-            # Checkbox TRUE is often 'TRUE', FALSE is 'FALSE'
-            # But let's just force update to be safe or check carefully
+            # IMPORTANT: Preserve existing TRUE values (manual edits)
+            # Only set TRUE if detected in screenshot or already marked TRUE
+            # Only set FALSE if NOT detected AND currently not TRUE
+            is_already_present = current_val in ["TRUE", "1", "YES"]
             
-            status_val = True if is_present else False
-            # Create cell object
+            if is_already_present:
+                # Member is already marked present (possibly manually) - preserve it
+                status_val = True
+            else:
+                # Member not currently marked present - use screenshot detection
+                status_val = is_present_from_screenshot
+            
             cells_to_update.append(gspread.Cell(row_num, col_index, status_val))
             
         if cells_to_update:
@@ -334,15 +340,23 @@ def recalculate_missed_streaks(client):
                  dropdown_val = min(consecutive_misses, 3)
                  
                  current_miss_val = row[missed_col_index - 1]
-                 
-                 # Check if update needed
-                 # IMPORTANT: Once someone reaches 3 misses, they stay locked at 3
-                 # They cannot reset their counter by attending - it's a permanent flag
                  current_val_str = str(current_miss_val).strip()
                  
+                 # Check if update needed
+                 # Lockout logic: Once someone reaches 3 misses, they stay locked at 3
+                 # UNLESS they are marked present for the most recent meeting (manual override)
                  if current_val_str == "3":
-                     # Already at 3 - DON'T reset, keep it locked at 3
-                     continue
+                     # Check if the most recent meeting has them marked as present
+                     # If so, this is a manual override - respect it and recalculate
+                     if valid_date_indices:
+                         most_recent_idx = valid_date_indices[-1]  # Last date is most recent
+                         most_recent_val = str(row[most_recent_idx]).strip().upper()
+                         if most_recent_val in ["TRUE", "1", "YES"]:
+                             # Manual override detected - allow recalculation
+                             print(f"🔓 Member '{row[0]}' was at 3 misses but attended most recent meeting - unlocking")
+                         else:
+                             # Still absent for most recent - keep locked at 3
+                             continue
                  
                  if str(current_miss_val) != str(dropdown_val):
                      sheet.update_cell(row_num, missed_col_index, dropdown_val)
