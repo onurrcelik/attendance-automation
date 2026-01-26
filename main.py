@@ -43,7 +43,7 @@ def get_google_sheet_client():
             
             flow = InstalledAppFlow.from_client_config(client_config, config.SCOPES)
             # Use fixed port 8080 to match the GCP Console "Authorized redirect URI"
-            creds = flow.run_local_server(port=8080)
+            creds = flow.run_local_server(port=8080, prompt='consent')
             
         # Save the credentials for the next run
         with open(config.TOKEN_FILE, 'w') as token:
