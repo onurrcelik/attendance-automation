@@ -16,8 +16,8 @@ SCOPES = [
 ]
 
 # Drive Configuration - REPLACE WITH YOUR FOLDER IDs
-DRIVE_FOLDER_ID = "1mJvEr6dRpghYc0JlP4_lhhZyuN56qgZ8"
-PROCESSED_FOLDER_ID = "1xcop6WGvQ6MurP1Hw9VCsIgWufgHZt1J"
+DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
+PROCESSED_FOLDER_ID = os.getenv("PROCESSED_FOLDER_ID")
 
 # Email Configuration
 EMAIL_SHEET_NAME = "Exposure Members"
@@ -31,4 +31,4 @@ import pytesseract
 pytesseract.pytesseract.tesseract_cmd = '/opt/homebrew/bin/tesseract'
 
 # Attendance Rules
-CONSECUTIVE_MISS_LIMIT = 3
+CONSECUTIVE_MISS_LIMIT = 4

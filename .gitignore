@@ -25,3 +25,5 @@ send_final_*.py
 send_html_*.py
 test_ocr.py
 
+members.json
+com.onurcelik.*.plist

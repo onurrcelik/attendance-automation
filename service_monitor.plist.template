@@ -6,19 +6,19 @@
     <string>com.onurcelik.exposure_attendance</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Library/Frameworks/Python.framework/Versions/3.13/bin/python3</string>
+        <string>/path/to/your/python3</string>
         <string>-u</string>
         <string>drive_monitor.py</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/onurcelik/Desktop/Cursor Projects/exposure attendance/exposure attendance</string>
+    <string>/path/to/your/project-root</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/onurcelik/Desktop/Cursor Projects/exposure attendance/exposure attendance/monitor.log</string>
+    <string>/path/to/your/project-root/monitor.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/onurcelik/Desktop/Cursor Projects/exposure attendance/exposure attendance/monitor.err</string>
+    <string>/path/to/your/project-root/monitor.err</string>
 </dict>
 </plist>

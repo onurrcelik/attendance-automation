@@ -337,31 +337,17 @@ def recalculate_missed_streaks(client):
                          continue
                  
                  # Cap at 3 for the dropdown options (0, 1, 2, 3)
-                 dropdown_val = min(consecutive_misses, 3)
+                 dropdown_val = min(consecutive_misses, config.CONSECUTIVE_MISS_LIMIT)
                  
                  current_miss_val = row[missed_col_index - 1]
                  current_val_str = str(current_miss_val).strip()
                  
-                 # Check if update needed
-                 # Lockout logic: Once someone reaches 3 misses, they stay locked at 3
-                 # UNLESS they are marked present for the most recent meeting (manual override)
-                 if current_val_str == "3":
-                     # Check if the most recent meeting has them marked as present
-                     # If so, this is a manual override - respect it and recalculate
-                     if valid_date_indices:
-                         most_recent_idx = valid_date_indices[-1]  # Last date is most recent
-                         most_recent_val = str(row[most_recent_idx]).strip().upper()
-                         if most_recent_val in ["TRUE", "1", "YES"]:
-                             # Manual override detected - allow recalculation
-                             print(f"🔓 Member '{row[0]}' was at 3 misses but attended most recent meeting - unlocking")
-                         else:
-                             # Still absent for most recent - keep locked at 3
-                             continue
+
                  
                  if str(current_miss_val) != str(dropdown_val):
                      sheet.update_cell(row_num, missed_col_index, dropdown_val)
-                     if dropdown_val == 3:
-                         print(f"⚠️ ALERT: Member '{row[0]}' has reached 3 consecutive misses! (LOCKED)")
+                     if dropdown_val == config.CONSECUTIVE_MISS_LIMIT:
+                         print(f"⚠️ ALERT: Member '{row[0]}' has reached {config.CONSECUTIVE_MISS_LIMIT} consecutive misses! (LOCKED)")
         else:
             print(f"Warning: Column '{missed_col_name}' not found.")
 
