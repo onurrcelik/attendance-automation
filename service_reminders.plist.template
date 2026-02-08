@@ -6,24 +6,23 @@
     <string>com.onurcelik.exposure_reminders</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Library/Frameworks/Python.framework/Versions/3.13/bin/python3</string>
-        <string>-u</string>
+        <string>/path/to/your/python3</string>
         <string>send_reminders.py</string>
     </array>
     <key>StartCalendarInterval</key>
     <dict>
-        <key>Weekday</key>
-        <integer>4</integer> 
         <key>Hour</key>
         <integer>19</integer>
         <key>Minute</key>
         <integer>00</integer>
     </dict>
+    <key>RunAtLoad</key>
+    <true/>
     <key>WorkingDirectory</key>
-    <string>/Users/onurcelik/Desktop/Cursor Projects/exposure attendance/exposure attendance</string>
+    <string>/path/to/your/project-root</string>
     <key>StandardOutPath</key>
-    <string>/Users/onurcelik/Desktop/Cursor Projects/exposure attendance/exposure attendance/reminders.log</string>
+    <string>/path/to/your/project-root/reminders.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/onurcelik/Desktop/Cursor Projects/exposure attendance/exposure attendance/reminders.err</string>
+    <string>/path/to/your/project-root/reminders.err</string>
 </dict>
 </plist>
