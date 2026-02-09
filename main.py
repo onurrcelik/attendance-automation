@@ -265,8 +265,10 @@ def update_sheet_attendance(client, present_members, target_date=None):
 
 def recalculate_missed_streaks(client):
     """
-    Recalculates the '# of Meetings Missed in a Row' for all members
-    based on the current state of the sheet.
+    Count consecutive missed meetings going backwards from the latest marked event.
+    - Empty cells = skip (no meeting data)
+    - FALSE = missed (increment counter)
+    - TRUE = attended (stop counting)
     """
     if not client:
         return
@@ -276,80 +278,58 @@ def recalculate_missed_streaks(client):
         all_records = sheet.get_all_values()
         headers = all_records[0]
         
+        # Find the missed column
         missed_col_name = "# of Meetings Missed in a Row"
         missed_col_index = -1
-        
         for idx, h in enumerate(headers):
-             if missed_col_name in h:
-                 missed_col_index = idx + 1
-                 break
+            if missed_col_name in h:
+                missed_col_index = idx + 1
+                break
         
-        if missed_col_index != -1:
-             print(f"Updating '{missed_col_name}' column (Index: {missed_col_index})...")
-             
-             # Identify date columns
-             date_indices = []
-             for idx, header in enumerate(headers):
-                try:
-                    dt = datetime.datetime.strptime(header, "%d/%m/%Y")
-                    date_indices.append((idx, dt))
-                except ValueError:
-                    continue
-             
-             # Sort by date
-             date_indices.sort(key=lambda x: x[1])
-             
-             # Filter out future dates: keep dates <= TODAY
-             cutoff_date = datetime.date.today()
-                 
-             valid_date_indices = []
-             for idx, dt in date_indices:
-                 if dt.date() <= cutoff_date:
-                     valid_date_indices.append(idx)
-             
-             # Iterate backwards through VALID dates
-             for i, row in enumerate(all_records[1:]): # Skip header
-                 row_num = i + 2
-                 
-                 consecutive_misses = 0
-                 # Iterate backwards
-                 for col_idx in reversed(valid_date_indices):
-                     val = row[col_idx]
-                     str_val = str(val).strip().upper()
-                     
-                     # Handle attendance states:
-                     # - Empty/"" = No meeting that week, SKIP (don't count, don't reset)
-                     # - FALSE = Meeting happened, person was ABSENT (counts as miss)
-                     # - TRUE/1/YES = Meeting happened, person was PRESENT (resets streak)
-                     
-                     if str_val == "":
-                         # No screenshot uploaded = no meeting = SKIP this week
-                         # Don't count it, but also don't reset the streak
-                         continue
-                     elif str_val == "FALSE":
-                         # Meeting happened, person was absent
-                         consecutive_misses += 1
-                     elif str_val in ["TRUE", "1", "YES"]:
-                         # Meeting happened, person was present - reset streak
-                         break
-                     else:
-                         # Unknown value, skip
-                         continue
-                 
-                 # Cap at 3 for the dropdown options (0, 1, 2, 3)
-                 dropdown_val = min(consecutive_misses, config.CONSECUTIVE_MISS_LIMIT)
-                 
-                 current_miss_val = row[missed_col_index - 1]
-                 current_val_str = str(current_miss_val).strip()
-                 
-
-                 
-                 if str(current_miss_val) != str(dropdown_val):
-                     sheet.update_cell(row_num, missed_col_index, dropdown_val)
-                     if dropdown_val == config.CONSECUTIVE_MISS_LIMIT:
-                         print(f"⚠️ ALERT: Member '{row[0]}' has reached {config.CONSECUTIVE_MISS_LIMIT} consecutive misses! (LOCKED)")
-        else:
+        if missed_col_index == -1:
             print(f"Warning: Column '{missed_col_name}' not found.")
+            return
+        
+        print(f"Updating '{missed_col_name}' column...")
+        
+        # Find all date columns and filter out future dates
+        date_indices = []
+        today = datetime.date.today()
+        for idx, header in enumerate(headers):
+            try:
+                dt = datetime.datetime.strptime(header, "%d/%m/%Y")
+                if dt.date() <= today:  # Only include past/current dates
+                    date_indices.append((idx, dt))
+            except ValueError:
+                continue
+        
+        # Sort by date descending (latest first)
+        date_indices.sort(key=lambda x: x[1], reverse=True)
+        
+        # Process each member
+        for i, row in enumerate(all_records[1:]):
+            row_num = i + 2
+            consecutive_misses = 0
+            
+            # Count backwards from latest date
+            for col_idx, _ in date_indices:
+                val = str(row[col_idx]).strip().upper()
+                
+                if val == "":
+                    # Empty = no data, skip
+                    continue
+                elif val == "FALSE":
+                    # Missed this meeting
+                    consecutive_misses += 1
+                elif val in ["TRUE", "1", "YES"]:
+                    # Attended - stop counting
+                    break
+            
+            # Update if changed (no cap - show actual count)
+            current_val = str(row[missed_col_index - 1]).strip()
+            if current_val != str(consecutive_misses):
+                sheet.update_cell(row_num, missed_col_index, consecutive_misses)
+                print(f"Updated '{row[0]}': {consecutive_misses} consecutive misses")
 
     except Exception as e:
         print(f"Error recalculating streaks: {e}")

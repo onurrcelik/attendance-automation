@@ -31,4 +31,4 @@ import pytesseract
 pytesseract.pytesseract.tesseract_cmd = '/opt/homebrew/bin/tesseract'
 
 # Attendance Rules
-CONSECUTIVE_MISS_LIMIT = 4
+# (No cap on consecutive misses - we show the actual count)
