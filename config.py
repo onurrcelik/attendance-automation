@@ -19,11 +19,6 @@ SCOPES = [
 DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
 PROCESSED_FOLDER_ID = os.getenv("PROCESSED_FOLDER_ID")
 
-# Email Configuration
-EMAIL_SHEET_NAME = "Exposure Members"
-EMAIL_COL_HEADER = "E-mail"
-MEETING_TIME_HOUR = 21 # 21:00 CET, so reminder at 19:00? User said 2 hours before.
-
 
 # OCR Configuration
 
