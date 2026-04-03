@@ -15,17 +15,30 @@ import main as attendance_script  # Import existing logic
 
 def parse_date_from_filename(filename):
     """
-    Tries to parse a date from the filename in DD.MM.YYYY format.
+    Tries to parse a date from the filename.
+    Supports:
+      - DD.MM.YYYY (e.g. 02.04.2026.png)
+      - YYYY-MM-DD (e.g. Screenshot 2026-04-02 at 21.21.46.png)
     Returns a datetime.date object or None if no match found.
     """
-    # Regex for DD.MM.YYYY
+    # Try YYYY-MM-DD first (macOS screenshot format)
+    match = re.search(r"(\d{4})-(\d{2})-(\d{2})", filename)
+    if match:
+        year, month, day = map(int, match.groups())
+        try:
+            return datetime.date(year, month, day)
+        except ValueError:
+            pass
+
+    # Try DD.MM.YYYY
     match = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", filename)
     if match:
         day, month, year = map(int, match.groups())
         try:
             return datetime.date(year, month, day)
         except ValueError:
-            return None
+            pass
+
     return None
 
 def get_drive_service():
@@ -103,54 +116,46 @@ def check_for_files(service):
 def process_drive_file(service, file_meta):
     file_id = file_meta['id']
     file_name = file_meta['name']
-    created_time_str = file_meta['createdTime'] # ISO 8601 string
-    
+    created_time_str = file_meta['createdTime']
+
     print(f"Processing {file_name}...")
-    
-    # 1. Download File
+
+    # 1. Download file
     request = service.files().get_media(fileId=file_id)
     fh = io.BytesIO()
     downloader = MediaIoBaseDownload(fh, request)
     done = False
-    while done is False:
-        status, done = downloader.next_chunk()
-    
-    # Save locally to temp path
+    while not done:
+        _, done = downloader.next_chunk()
+
     local_path = f"temp_{file_name}"
     with open(local_path, "wb") as f:
         f.write(fh.getbuffer())
-        
-    # 2. Determine Attendance Date
-    # First, try to parse from filename (e.g., 04.12.2025.png)
+
+    # 2. Determine attendance date
     parsed_date = parse_date_from_filename(file_name)
-    
     if parsed_date:
-        meeting_thursday = parsed_date
-        print(f"Parsed date from filename: {meeting_thursday}")
+        meeting_date = parsed_date
+        print(f"Parsed date from filename: {meeting_date}")
     else:
-        # Fallback: Parse createdTime (e.g., 2025-12-10T17:48:08.000Z)
-        # We strip 'Z' and typically handle UTC. For simplicity, we treat as naive or assume UTC.
         upload_dt = datetime.datetime.fromisoformat(created_time_str.replace('Z', '+00:00'))
         upload_date = upload_dt.date()
-        
-        meeting_thursday = get_latest_thursday(upload_date)
-        print(f"File uploaded on {upload_date}. Assigning to meeting on Thursday {meeting_thursday}.")
-    
-    # 3. Process Attendance
-    success = attendance_script.process_single_image(local_path, target_date=meeting_thursday)
-    
-    # Cleanup local file
-    if os.path.exists(local_path):
-        os.remove(local_path)
-    
-    # 4. Move to Processed Folder
+        meeting_date = get_latest_thursday(upload_date)
+        print(f"File uploaded on {upload_date}. Assigning to Thursday {meeting_date}.")
+
+    # 3. Process attendance — always clean up temp file regardless of outcome
+    success = False
+    try:
+        success = attendance_script.process_single_image(local_path, target_date=meeting_date)
+    finally:
+        if os.path.exists(local_path):
+            os.remove(local_path)
+
+    # 4. Move to Processed only if sheet was actually updated
     if success:
-        if config.PROCESSED_FOLDER_ID != "REPLACE_WITH_PROCESSED_FOLDER_ID":
-            # Retrieve existing parents to remove them
+        if config.PROCESSED_FOLDER_ID and config.PROCESSED_FOLDER_ID != "REPLACE_WITH_PROCESSED_FOLDER_ID":
             file = service.files().get(fileId=file_id, fields='parents').execute()
             previous_parents = ",".join(file.get('parents'))
-            
-            # Move file
             service.files().update(
                 fileId=file_id,
                 addParents=config.PROCESSED_FOLDER_ID,
@@ -161,26 +166,79 @@ def process_drive_file(service, file_meta):
         else:
             print("Warning: PROCESSED_FOLDER_ID not set. File remains in source folder.")
     else:
-        print(f"Failed to process {file_name}. Left in source folder.")
+        print(f"Failed to process {file_name}. Left in source folder for retry.")
+
+LOCAL_SCREENSHOTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots")
+LOCAL_PROCESSED_DIR = os.path.join(LOCAL_SCREENSHOTS_DIR, "processed")
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+def check_local_screenshots_folder():
+    """Processes any new images in the local screenshots/ folder."""
+    if not os.path.isdir(LOCAL_SCREENSHOTS_DIR):
+        return
+
+    os.makedirs(LOCAL_PROCESSED_DIR, exist_ok=True)
+
+    for fname in sorted(os.listdir(LOCAL_SCREENSHOTS_DIR)):
+        fpath = os.path.join(LOCAL_SCREENSHOTS_DIR, fname)
+        if not os.path.isfile(fpath):
+            continue
+        if os.path.splitext(fname)[1].lower() not in IMAGE_EXTENSIONS:
+            continue
+
+        print(f"[Local] Processing {fname}...", flush=True)
+        try:
+            parsed_date = parse_date_from_filename(fname)
+            if parsed_date:
+                meeting_date = parsed_date
+                print(f"[Local] Parsed date from filename: {meeting_date}", flush=True)
+            else:
+                meeting_date = get_latest_thursday(datetime.date.today())
+                print(f"[Local] No date in filename. Using {meeting_date}.", flush=True)
+
+            success = attendance_script.process_single_image(fpath, target_date=meeting_date)
+
+            if success:
+                dest = os.path.join(LOCAL_PROCESSED_DIR, fname)
+                os.rename(fpath, dest)
+                print(f"[Local] Moved {fname} to processed/", flush=True)
+            else:
+                print(f"[Local] Failed to process {fname}. Left in screenshots/ for retry.", flush=True)
+        except Exception as e:
+            print(f"[Local] Error processing {fname}: {e}. Skipping.", flush=True)
+
+
+def cleanup_stale_temp_files():
+    """Remove any leftover temp_* files from previous crashes."""
+    work_dir = os.path.dirname(os.path.abspath(__file__))
+    for fname in os.listdir(work_dir):
+        if fname.startswith("temp_") and os.path.splitext(fname)[1].lower() in IMAGE_EXTENSIONS:
+            fpath = os.path.join(work_dir, fname)
+            try:
+                os.remove(fpath)
+                print(f"Cleaned up stale temp file: {fname}", flush=True)
+            except Exception as e:
+                print(f"Could not remove stale temp file {fname}: {e}", flush=True)
+
 
 def start_monitoring():
     print("Starting Drive Monitor...", flush=True)
     print("Press Ctrl+C to stop.", flush=True)
+    cleanup_stale_temp_files()
     service = get_drive_service()
-    
+
     sheet_client = attendance_script.get_google_sheet_client()
 
     while True:
         try:
             check_for_files(service)
-            
+            check_local_screenshots_folder()
+
             # Also sync sheet streaks (handle manual updates)
             if sheet_client:
                  attendance_script.recalculate_missed_streaks(sheet_client)
             else:
-                 # Try to reconnect if client failed initially or expired? 
-                 # get_google_sheet_client handles auth refresh internally usually if using gspread properly
-                 # but here we just retry getting it
                  sheet_client = attendance_script.get_google_sheet_client()
 
             # Sleep for 1 minute (60 seconds)

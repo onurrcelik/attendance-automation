@@ -198,70 +198,56 @@ def match_attendance(ocr_text, members):
     return present_members
 
 def update_sheet_attendance(client, present_members, target_date=None):
-    """Updates the Google Sheet with attendance."""
+    """Updates the Google Sheet with attendance. Returns True on success, False on failure."""
     if not client:
-        return
+        return False
 
     try:
         sheet = client.open(config.SHEET_NAME).sheet1
-        
+
         # Get all values to map headers and rows
         all_records = sheet.get_all_values()
         headers = all_records[0]
-        
+
         # Use provided date or today
         if target_date:
             date_str = target_date.strftime("%d/%m/%Y")
         else:
             date_str = datetime.date.today().strftime("%d/%m/%Y")
-        
+
         try:
             col_index = headers.index(date_str) + 1
         except ValueError:
-            print(f"Error: Column for date ({date_str}) not found in specific format DD/MM/YYYY.")
-            print(f"Existing headers: {headers}")
-            return
+            print(f"Error: Column for date ({date_str}) not found. Existing headers: {headers}")
+            return False
 
-        # Prepare column update
-        member_name_col_index = 0 # Assuming first column
-        
-        # Prepare updates list for batching
+        member_name_col_index = 0
         cells_to_update = []
-        
+
         print(f"Updating attendance for {date_str} in column {col_index}...")
-        
-        for i, row in enumerate(all_records[1:]): # Skip header
+
+        for i, row in enumerate(all_records[1:]):
             member_name = row[member_name_col_index]
-            row_num = i + 2 
-            
+            row_num = i + 2
+
             is_present_from_screenshot = member_name in present_members
             current_val = str(row[col_index - 1]).strip().upper()
-            
-            # IMPORTANT: Preserve existing TRUE values (manual edits)
-            # Only set TRUE if detected in screenshot or already marked TRUE
-            # Only set FALSE if NOT detected AND currently not TRUE
             is_already_present = current_val in ["TRUE", "1", "YES"]
-            
-            if is_already_present:
-                # Member is already marked present (possibly manually) - preserve it
-                status_val = True
-            else:
-                # Member not currently marked present - use screenshot detection
-                status_val = is_present_from_screenshot
-            
+
+            # Preserve existing TRUE values (manual edits); only OCR can add TRUE, never remove it
+            status_val = True if is_already_present else is_present_from_screenshot
             cells_to_update.append(gspread.Cell(row_num, col_index, status_val))
-            
+
         if cells_to_update:
             sheet.update_cells(cells_to_update)
             print(f"Attendance for {date_str} updated successfully ({len(cells_to_update)} cells).")
-        else:
-             print("No updates needed.")
-        
-        # Recalculate streaks immediately
+
         recalculate_missed_streaks(client)
+        return True
 
     except Exception as e:
         print(f"Error updating sheet: {e}")
+        return False
 
 def recalculate_missed_streaks(client):
     """
@@ -357,19 +343,70 @@ def process_single_image(image_path, target_date=None):
     
     if client:
         print("Updating Google Sheet...")
-        update_sheet_attendance(client, present_members, target_date)
-        return True
+        return update_sheet_attendance(client, present_members, target_date)
     else:
         print("Skipping Sheet update (No credentials).")
         return False
 
+def _parse_date_from_filename(filename):
+    """Try to parse a date from the filename (YYYY-MM-DD or DD.MM.YYYY)."""
+    import re
+    # YYYY-MM-DD (macOS screenshot format)
+    m = re.search(r"(\d{4})-(\d{2})-(\d{2})", filename)
+    if m:
+        try:
+            return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            pass
+    # DD.MM.YYYY
+    m = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", filename)
+    if m:
+        try:
+            return datetime.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+        except ValueError:
+            pass
+    return None
+
+
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 main.py <screenshot_path>")
+    args = sys.argv[1:]
+
+    # --recalculate: just update streak counters, no image needed
+    if args and args[0] == "--recalculate":
+        print("Recalculating missed streaks...")
+        client = get_google_sheet_client()
+        recalculate_missed_streaks(client)
+        return
+
+    if not args:
+        print("Usage:")
+        print("  python3 main.py <screenshot_path> [--date DD/MM/YYYY]")
+        print("  python3 main.py --recalculate")
         sys.exit(1)
-        
-    image_path = sys.argv[1]
-    process_single_image(image_path)
+
+    image_path = args[0]
+
+    # --date DD/MM/YYYY override
+    target_date = None
+    if "--date" in args:
+        date_idx = args.index("--date") + 1
+        if date_idx < len(args):
+            try:
+                target_date = datetime.datetime.strptime(args[date_idx], "%d/%m/%Y").date()
+                print(f"Using specified date: {target_date}")
+            except ValueError:
+                print(f"Invalid date format '{args[date_idx]}'. Use DD/MM/YYYY.")
+                sys.exit(1)
+
+    # Auto-detect date from filename if not specified
+    if target_date is None:
+        target_date = _parse_date_from_filename(os.path.basename(image_path))
+        if target_date:
+            print(f"Auto-detected date from filename: {target_date}")
+        else:
+            print("Warning: Could not detect date from filename. Using today's date.")
+
+    process_single_image(image_path, target_date=target_date)
 
 if __name__ == "__main__":
     main()

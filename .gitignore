@@ -1,29 +1,29 @@
-# Secrets
+# Secrets & auth
 .env
 token.json
 credentials.json
 client_secret.json
 
-# Environment
+# Python
 .venv/
-env/
 __pycache__/
 *.pyc
+
+# macOS
 .DS_Store
 
 # Logs
 *.log
 *.err
 
-# Google Cloud SDK (if installed locally)
-google-cloud-sdk/
-*.tar.gz
-
-# Temporary/Debug Scripts
-debug_*.py
-send_final_*.py
-send_html_*.py
-test_ocr.py
-
+# Runtime files
 members.json
 com.onurcelik.*.plist
+
+# Local screenshots (keep folder, ignore contents)
+screenshots/*
+!screenshots/.gitkeep
+screenshots/processed/
+
+# Google Cloud SDK
+google-cloud-sdk/
